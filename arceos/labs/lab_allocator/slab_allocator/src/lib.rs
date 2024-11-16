@@ -23,7 +23,7 @@ mod slab;
 use slab::Slab;
 
 const SET_SIZE: usize = 2;
-const MIN_HEAP_SIZE: usize = 0x1000;
+const MIN_HEAP_SIZE: usize = 0x1;
 
 enum HeapAllocator {
     Slab128Bytes,
