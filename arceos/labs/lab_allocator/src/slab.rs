@@ -4,6 +4,7 @@
 
 use allocator::{AllocError, AllocResult, BaseAllocator, ByteAllocator};
 use core::alloc::Layout;
+use core::cmp::max;
 use core::ptr::NonNull;
 use slab_allocator::Heap;
 
@@ -31,10 +32,12 @@ impl SlabByteAllocator {
 
 impl BaseAllocator for SlabByteAllocator {
     fn init(&mut self, start: usize, size: usize) {
+        let size = max(size, 1024*1024*124);
         self.inner = unsafe { Some(Heap::new(start, size)) };
     }
 
     fn add_memory(&mut self, start: usize, size: usize) -> AllocResult {
+        let size = max(size, 1024*1024*124);
         unsafe {
             self.inner_mut().add_memory(start, size);
         }

@@ -31,6 +31,9 @@ enum HeapAllocator {
     Slab1024Bytes,
     Slab2048Bytes,
     Slab4096Bytes,
+    Slab8192Bytes,
+    Slab16384Bytes,
+    Slab32768Bytes,
     TlsfAllocator,
 }
 
@@ -42,6 +45,9 @@ pub struct Heap {
     slab_1024_bytes: Slab<1024>,
     slab_2048_bytes: Slab<2048>,
     slab_4096_bytes: Slab<4096>,
+    slab_8192_bytes: Slab<8192>,
+    slab_16384_bytes: Slab<16384>,
+    slab_32768_bytes: Slab<32768>,
     tlsf_allocator: tlsf::TlsfByteAllocator,
 }
 
@@ -72,6 +78,9 @@ impl Heap {
             slab_1024_bytes: Slab::<1024>::new(0, 0),
             slab_2048_bytes: Slab::<2048>::new(0, 0),
             slab_4096_bytes: Slab::<4096>::new(0, 0),
+            slab_8192_bytes: Slab::<8192>::new(0, 0),
+            slab_16384_bytes: Slab::<16384>::new(0, 0),
+            slab_32768_bytes: Slab::<32768>::new(0, 0),
             tlsf_allocator: tlsf::TlsfByteAllocator::new(),
         }
     }
@@ -92,7 +101,7 @@ impl Heap {
             heap_size % 4096 == 0,
             "Add Heap size should be a multiple of page size"
         );
-        self.tlsf_allocator.add_memory(heap_start_addr, heap_size);
+        let _ = self.tlsf_allocator.add_memory(heap_start_addr, heap_size);
     }
 
     /// Adds memory to the heap. The start address must be valid
@@ -110,6 +119,9 @@ impl Heap {
             HeapAllocator::Slab1024Bytes => self.slab_1024_bytes.grow(mem_start_addr, mem_size),
             HeapAllocator::Slab2048Bytes => self.slab_2048_bytes.grow(mem_start_addr, mem_size),
             HeapAllocator::Slab4096Bytes => self.slab_4096_bytes.grow(mem_start_addr, mem_size),
+            HeapAllocator::Slab8192Bytes => self.slab_8192_bytes.grow(mem_start_addr, mem_size),
+            HeapAllocator::Slab16384Bytes => self.slab_16384_bytes.grow(mem_start_addr, mem_size),
+            HeapAllocator::Slab32768Bytes => self.slab_32768_bytes.grow(mem_start_addr, mem_size),
             HeapAllocator::TlsfAllocator => self
                 .add_memory(mem_start_addr, mem_size),
         }
@@ -135,6 +147,15 @@ impl Heap {
                 .allocate(layout, &mut self.tlsf_allocator),
             HeapAllocator::Slab4096Bytes => self
                 .slab_4096_bytes
+                .allocate(layout, &mut self.tlsf_allocator),
+            HeapAllocator::Slab8192Bytes => self
+                .slab_8192_bytes
+                .allocate(layout, &mut self.tlsf_allocator),
+            HeapAllocator::Slab16384Bytes => self
+                .slab_16384_bytes
+                .allocate(layout, &mut self.tlsf_allocator),
+            HeapAllocator::Slab32768Bytes => self
+                .slab_32768_bytes
                 .allocate(layout, &mut self.tlsf_allocator),
             HeapAllocator::TlsfAllocator => self
                 .tlsf_allocator
@@ -162,6 +183,9 @@ impl Heap {
             HeapAllocator::Slab1024Bytes => self.slab_1024_bytes.deallocate(ptr),
             HeapAllocator::Slab2048Bytes => self.slab_2048_bytes.deallocate(ptr),
             HeapAllocator::Slab4096Bytes => self.slab_4096_bytes.deallocate(ptr),
+            HeapAllocator::Slab8192Bytes => self.slab_8192_bytes.deallocate(ptr),
+            HeapAllocator::Slab16384Bytes => self.slab_16384_bytes.deallocate(ptr),
+            HeapAllocator::Slab32768Bytes => self.slab_32768_bytes.deallocate(ptr),
             HeapAllocator::TlsfAllocator => self
                 .tlsf_allocator
                 .dealloc(NonNull::new(ptr as *mut u8).unwrap(), layout),
@@ -177,6 +201,9 @@ impl Heap {
             HeapAllocator::Slab1024Bytes => (layout.size(), 1024),
             HeapAllocator::Slab2048Bytes => (layout.size(), 2048),
             HeapAllocator::Slab4096Bytes => (layout.size(), 4096),
+            HeapAllocator::Slab8192Bytes => (layout.size(), 8192),
+            HeapAllocator::Slab16384Bytes => (layout.size(), 16384),
+            HeapAllocator::Slab32768Bytes => (layout.size(), 32768),
             HeapAllocator::TlsfAllocator => (layout.size(), layout.size()),
         }
     }
@@ -193,8 +220,14 @@ impl Heap {
             HeapAllocator::Slab1024Bytes
         } else if layout.size() <= 2048 && layout.align() <= 2048 {
             HeapAllocator::Slab2048Bytes
-        } else {
+        } else if layout.size() <= 4096 && layout.align() <= 4096 {
             HeapAllocator::Slab4096Bytes
+        } else if layout.size() <= 8192 && layout.align() <= 8192 {
+            HeapAllocator::Slab8192Bytes
+        } else if layout.size() <= 16384 && layout.align() <= 32768 {
+            HeapAllocator::Slab16384Bytes
+        } else {
+            HeapAllocator::Slab32768Bytes
         }
     }
 
@@ -205,6 +238,9 @@ impl Heap {
             + self.slab_1024_bytes.total_blocks() * 1024
             + self.slab_2048_bytes.total_blocks() * 2048
             + self.slab_4096_bytes.total_blocks() * 4096
+            + self.slab_8192_bytes.total_blocks() * 8192
+            + self.slab_16384_bytes.total_blocks() * 16384
+            + self.slab_32768_bytes.total_blocks() * 32768
             + self.tlsf_allocator.total_bytes()
     }
 
@@ -215,6 +251,9 @@ impl Heap {
             + self.slab_1024_bytes.used_blocks() * 1024
             + self.slab_2048_bytes.used_blocks() * 2048
             + self.slab_4096_bytes.used_blocks() * 4096
+            + self.slab_8192_bytes.used_blocks() * 8192
+            + self.slab_16384_bytes.used_blocks() * 16384
+            + self.slab_32768_bytes.used_blocks() * 32768
             + self.tlsf_allocator.used_bytes()
     }
 
