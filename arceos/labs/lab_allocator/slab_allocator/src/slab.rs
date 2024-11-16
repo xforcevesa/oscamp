@@ -44,7 +44,7 @@ impl<const BLK_SIZE: usize> Slab<BLK_SIZE> {
             Some(block) => Ok(block.addr()),
             None => {
                 let layout =
-                    unsafe { Layout::from_size_align_unchecked(SET_SIZE * BLK_SIZE, 4096) };
+                    unsafe { Layout::from_size_align_unchecked(SET_SIZE * BLK_SIZE, 2) };
                 if let Ok(ptr) = buddy.alloc(layout) {
                     unsafe {
                         self.grow(ptr.as_ptr() as usize, SET_SIZE * BLK_SIZE);

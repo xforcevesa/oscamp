@@ -22,10 +22,11 @@ mod tlsf;
 mod slab;
 use slab::Slab;
 
-const SET_SIZE: usize = 64;
-const MIN_HEAP_SIZE: usize = 0x8000;
+const SET_SIZE: usize = 2;
+const MIN_HEAP_SIZE: usize = 0x1000;
 
 enum HeapAllocator {
+    Slab128Bytes,
     Slab256Bytes,
     Slab512Bytes,
     Slab1024Bytes,
@@ -34,12 +35,14 @@ enum HeapAllocator {
     Slab8192Bytes,
     Slab16384Bytes,
     Slab32768Bytes,
+    Slab65536Bytes,
     TlsfAllocator,
 }
 
 /// A fixed size heap backed by multiple slabs with blocks of different sizes.
 /// Allocations over 4096 bytes are served by linked list allocator.
 pub struct Heap {
+    slab_128_bytes: Slab<128>,
     slab_256_bytes: Slab<256>,
     slab_512_bytes: Slab<512>,
     slab_1024_bytes: Slab<1024>,
@@ -48,6 +51,7 @@ pub struct Heap {
     slab_8192_bytes: Slab<8192>,
     slab_16384_bytes: Slab<16384>,
     slab_32768_bytes: Slab<32768>,
+    slab_65536_bytes: Slab<65536>,
     tlsf_allocator: tlsf::TlsfByteAllocator,
 }
 
@@ -73,6 +77,7 @@ impl Heap {
             "Heap size should be a multiple of minimum heap size"
         );
         Heap {
+            slab_128_bytes: Slab::<128>::new(0, 0),
             slab_256_bytes: Slab::<256>::new(0, 0),
             slab_512_bytes: Slab::<512>::new(0, 0),
             slab_1024_bytes: Slab::<1024>::new(0, 0),
@@ -81,6 +86,7 @@ impl Heap {
             slab_8192_bytes: Slab::<8192>::new(0, 0),
             slab_16384_bytes: Slab::<16384>::new(0, 0),
             slab_32768_bytes: Slab::<32768>::new(0, 0),
+            slab_65536_bytes: Slab::<65536>::new(0, 0),
             tlsf_allocator: tlsf::TlsfByteAllocator::new(),
         }
     }
@@ -114,6 +120,7 @@ impl Heap {
     /// given address is invalid.
     unsafe fn _grow(&mut self, mem_start_addr: usize, mem_size: usize, slab: HeapAllocator) {
         match slab {
+            HeapAllocator::Slab128Bytes => self.slab_128_bytes.grow(mem_start_addr, mem_size),
             HeapAllocator::Slab256Bytes => self.slab_256_bytes.grow(mem_start_addr, mem_size),
             HeapAllocator::Slab512Bytes => self.slab_512_bytes.grow(mem_start_addr, mem_size),
             HeapAllocator::Slab1024Bytes => self.slab_1024_bytes.grow(mem_start_addr, mem_size),
@@ -122,6 +129,7 @@ impl Heap {
             HeapAllocator::Slab8192Bytes => self.slab_8192_bytes.grow(mem_start_addr, mem_size),
             HeapAllocator::Slab16384Bytes => self.slab_16384_bytes.grow(mem_start_addr, mem_size),
             HeapAllocator::Slab32768Bytes => self.slab_32768_bytes.grow(mem_start_addr, mem_size),
+            HeapAllocator::Slab65536Bytes => self.slab_65536_bytes.grow(mem_start_addr, mem_size),
             HeapAllocator::TlsfAllocator => self
                 .add_memory(mem_start_addr, mem_size),
         }
@@ -133,6 +141,9 @@ impl Heap {
     /// The runtime is in `O(1)` for chunks of size <= 4096, and `O(n)` when chunk size is > 4096,
     pub fn allocate(&mut self, layout: Layout) -> Result<usize, AllocError> {
         match Heap::layout_to_allocator(&layout) {
+            HeapAllocator::Slab128Bytes => self
+                .slab_128_bytes
+                .allocate(layout, &mut self.tlsf_allocator),
             HeapAllocator::Slab256Bytes => self
                 .slab_256_bytes
                 .allocate(layout, &mut self.tlsf_allocator),
@@ -157,6 +168,9 @@ impl Heap {
             HeapAllocator::Slab32768Bytes => self
                 .slab_32768_bytes
                 .allocate(layout, &mut self.tlsf_allocator),
+            HeapAllocator::Slab65536Bytes => self
+                .slab_65536_bytes
+                .allocate(layout, &mut self.tlsf_allocator),
             HeapAllocator::TlsfAllocator => self
                 .tlsf_allocator
                 .alloc(layout)
@@ -178,6 +192,7 @@ impl Heap {
     /// given address is invalid.
     pub unsafe fn deallocate(&mut self, ptr: usize, layout: Layout) {
         match Heap::layout_to_allocator(&layout) {
+            HeapAllocator::Slab128Bytes => self.slab_128_bytes.deallocate(ptr),
             HeapAllocator::Slab256Bytes => self.slab_256_bytes.deallocate(ptr),
             HeapAllocator::Slab512Bytes => self.slab_512_bytes.deallocate(ptr),
             HeapAllocator::Slab1024Bytes => self.slab_1024_bytes.deallocate(ptr),
@@ -186,6 +201,7 @@ impl Heap {
             HeapAllocator::Slab8192Bytes => self.slab_8192_bytes.deallocate(ptr),
             HeapAllocator::Slab16384Bytes => self.slab_16384_bytes.deallocate(ptr),
             HeapAllocator::Slab32768Bytes => self.slab_32768_bytes.deallocate(ptr),
+            HeapAllocator::Slab65536Bytes => self.slab_32768_bytes.deallocate(ptr),
             HeapAllocator::TlsfAllocator => self
                 .tlsf_allocator
                 .dealloc(NonNull::new(ptr as *mut u8).unwrap(), layout),
@@ -196,6 +212,7 @@ impl Heap {
     /// allocation created with the specified `layout`.
     pub fn usable_size(&self, layout: Layout) -> (usize, usize) {
         match Heap::layout_to_allocator(&layout) {
+            HeapAllocator::Slab128Bytes => (layout.size(), 128),
             HeapAllocator::Slab256Bytes => (layout.size(), 256),
             HeapAllocator::Slab512Bytes => (layout.size(), 512),
             HeapAllocator::Slab1024Bytes => (layout.size(), 1024),
@@ -204,6 +221,7 @@ impl Heap {
             HeapAllocator::Slab8192Bytes => (layout.size(), 8192),
             HeapAllocator::Slab16384Bytes => (layout.size(), 16384),
             HeapAllocator::Slab32768Bytes => (layout.size(), 32768),
+            HeapAllocator::Slab65536Bytes => (layout.size(), 65536),
             HeapAllocator::TlsfAllocator => (layout.size(), layout.size()),
         }
     }
@@ -212,6 +230,8 @@ impl Heap {
     fn layout_to_allocator(layout: &Layout) -> HeapAllocator {
         if layout.size() > 4096 {
             HeapAllocator::TlsfAllocator
+        } else if layout.size() <= 128 && layout.align() <= 128 {
+            HeapAllocator::Slab128Bytes
         } else if layout.size() <= 256 && layout.align() <= 256 {
             HeapAllocator::Slab256Bytes
         } else if layout.size() <= 512 && layout.align() <= 512 {
@@ -224,16 +244,19 @@ impl Heap {
             HeapAllocator::Slab4096Bytes
         } else if layout.size() <= 8192 && layout.align() <= 8192 {
             HeapAllocator::Slab8192Bytes
-        } else if layout.size() <= 16384 && layout.align() <= 32768 {
+        } else if layout.size() <= 16384 && layout.align() <= 16384 {
             HeapAllocator::Slab16384Bytes
-        } else {
+        } else if layout.size() <= 32768 && layout.align() <= 32768 {
             HeapAllocator::Slab32768Bytes
+        } else {
+            HeapAllocator::Slab65536Bytes
         }
     }
 
     /// Returns total memory size in bytes of the heap.
     pub fn total_bytes(&self) -> usize {
-        self.slab_256_bytes.total_blocks() * 256
+        self.slab_128_bytes.total_blocks() * 128
+            + self.slab_256_bytes.total_blocks() * 256
             + self.slab_512_bytes.total_blocks() * 512
             + self.slab_1024_bytes.total_blocks() * 1024
             + self.slab_2048_bytes.total_blocks() * 2048
@@ -241,12 +264,14 @@ impl Heap {
             + self.slab_8192_bytes.total_blocks() * 8192
             + self.slab_16384_bytes.total_blocks() * 16384
             + self.slab_32768_bytes.total_blocks() * 32768
+            + self.slab_65536_bytes.total_blocks() * 65536
             + self.tlsf_allocator.total_bytes()
     }
 
     /// Returns allocated memory size in bytes.
     pub fn used_bytes(&self) -> usize {
-        self.slab_256_bytes.used_blocks() * 256
+        self.slab_128_bytes.used_blocks() * 128
+            + self.slab_256_bytes.used_blocks() * 256
             + self.slab_512_bytes.used_blocks() * 512
             + self.slab_1024_bytes.used_blocks() * 1024
             + self.slab_2048_bytes.used_blocks() * 2048
@@ -254,6 +279,7 @@ impl Heap {
             + self.slab_8192_bytes.used_blocks() * 8192
             + self.slab_16384_bytes.used_blocks() * 16384
             + self.slab_32768_bytes.used_blocks() * 32768
+            + self.slab_65536_bytes.used_blocks() * 65536
             + self.tlsf_allocator.used_bytes()
     }
 
